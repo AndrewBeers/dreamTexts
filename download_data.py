@@ -36,6 +36,7 @@ def convert_pdf_to_image(conversion_directory='E:\Pages', output_directory='E:\P
         document_basename = os.path.join(output_directory, os.path.basename(os.path.dirname(document)))
 
         if os.path.exists(document_basename + '-1.png'):
+            print 'Skipping', document_basename
             continue
 
         for pdf in pdfs:
