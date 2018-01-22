@@ -5,7 +5,8 @@ import internetarchive
 import numpy as np
 
 from subprocess import call
-# from scipy.misc import imresize
+from scipy.misc import imresize
+from scipy.ndimage import zoom
 from PIL import Image
 
 def internet_archive_login():
@@ -91,22 +92,69 @@ def create_hdf5_file(output_filepath, num_cases, image_shape=(64, 64)):
     return hdf5_file
 
 
-def store_to_hdf5(data_directory, hdf5_file, image_shape):
+def store_to_hdf5(data_directory, hdf5_file, image_shape, verbose=True):
 
     input_images = glob.glob(os.path.join(data_directory, '*.png'))
 
     hdf5_file = create_hdf5_file(hdf5_file, num_cases=len(input_images), image_shape=image_shape)
 
     for image in input_images:
-        print(image)
-        img = Image.open(image)
-        data = np.asarray(img)
-        hdf5_file.root.data.append(data[np.newaxis])
+        try:
+            if verbose:
+                print(image)
+            img = Image.open(image)
+            data = np.asarray(img)
+            hdf5_file.root.data.append(data[np.newaxis])
+            hdf5_file.root.imagenames.append(np.array(os.path.basename(image))[np.newaxis][np.newaxis])
+        except:
+            print 'ERROR WRITING TO HDF5', image
+
+    hdf5_file.close()
+    fd = dg
 
     return hdf5_file
 
+
+class PageData(object):
+
+    def __init__(self, collection='MBLWHOI', shape=(64,64), hdf5=None):
+
+        self.collection = collection
+        self.shape = shape
+        self.hdf5 = hdf5
+
+        self.image_num = hdf5.root.data.shape[0]
+        self.indexes = np.arange(self.image_num)
+        np.random.shuffle(self.indexes)
+
+
+    def get_next_batch(self, batch_num=0, batch_size=64, zoom_level=1):
+
+        total_batches = self.image_num / batch_size - 1
+
+        if batch_num % total_batches == 0:
+            np.random.shuffle(self.indexes)
+
+        indexes = self.indexes[(batch_num % total_batches) * batch_size: (batch_num % total_batches + 1) * batch_size]
+        data = np.array([self.hdf5.root.data[idx] for idx in indexes]) / 127.5 - 1
+
+        if zoom_level == 1:
+            return data
+        else:
+            data = zoom(data, zoom=[1,1.0/zoom_level,1.0/zoom_level,1])
+            return data
+
+
+    def close(self):
+
+        self.hdf5.close()
+
+
 if __name__ == '__main__':
+
+    linux_media = '/media/anderff/My Passport/'
+    windows_media = 'E:/'
 
     # internet_archive_download()
     # convert_pdf_to_image()
-    preprocess_image()
+    preprocess_image(input_directory = linux_media + 'Pages_Images', output_directory = linux_media + 'Pages_Images_Preprocessed')

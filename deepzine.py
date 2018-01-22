@@ -2,8 +2,9 @@
 import os
 import tables
 
-from download_data import internet_archive_download, convert_pdf_to_image, preprocess_image, store_to_hdf5
+from download_data import internet_archive_download, convert_pdf_to_image, preprocess_image, store_to_hdf5, PageData
 from util import add_parameter
+from model import PGGAN
 
 class DeepZine(object):
 
@@ -24,11 +25,14 @@ class DeepZine(object):
         add_parameter(self, kwargs, 'train_hdf5', None)
         add_parameter(self, kwargs, 'train_overwrite', False)
 
-        # Training Classified Parameters
+        # Training Classifier Parameters
         # TODO
 
         # Training GAN Parameters
-
+        add_parameter(self, kwargs, 'gan_samples_dir', './samples')
+        add_parameter(self, kwargs, 'gan_log_dir', './log')
+        add_parameter(self, kwargs, 'gan_latent_size', 512)
+        add_parameter(self, kwargs, 'gan_max_filter', 1024)
 
         return
 
@@ -39,7 +43,12 @@ class DeepZine(object):
             # Data preparation.
             self.training_storage = self.download_data(data_directory=self.train_data_directory, download_pdf=self.train_download_pdf, internetarchive_collection=self.train_internetarchive_collection, convert_pdf=self.train_convert_pdf, preprocess_images=self.train_preprocess_images, preprocess_shape=self.train_preprocess_shape, hdf5=self.train_hdf5, overwrite=self.train_overwrite)
 
-            # model = self.create_model('upsampling_gan')
+            if True:
+            # try:
+                self.train_gan()
+            # except:
+                # self.training_storage.close()
+
 
             self.training_storage.close()
 
@@ -85,14 +94,50 @@ class DeepZine(object):
         # Convert to HDF5
         if not os.path.exists(hdf5) or overwrite:
             output_hdf5 = store_to_hdf5(preprocessed_directory, hdf5, preprocess_shape)
-            return output_hdf5
         else:
-            return tables.open_file(hdf5, "r")
+            output_hdf5 = tables.open_file(hdf5, "r")
 
-    def create_model(self):
+        # Convert to data-loading object.
+        return PageData(hdf5=output_hdf5, shape=preprocess_shape, collection=internetarchive_collection)
 
-        return
+    def train_gan(self):
 
+        # Create necessary directories
+        for work_dir in [self.gan_samples_dir, self.gan_log_dir]:
+            if not os.path.exists(work_dir):
+                os.mkdir(work_dir)
+
+        # Inherited this from other code, think of a programmatic way to do it.
+        training_depths = [1,2,2,3,3,4,4,5,5,6,6]
+        read_depths = [1,1,2,2,3,3,4,4,5,5,6]
+
+        for i in range(len(training_depths)):
+
+            if (i % 2 == 0):
+                transition = False
+            else:
+                transition = True
+
+            output_model_path = os.path.join(self.gan_log_dir, str(training_depths[i]), 'model.ckpt')
+            if not os.path.exists(os.path.dirname(output_model_path)):
+                os.mkdir(os.path.dirname(output_model_path))
+
+            input_model_path = os.path.join(self.gan_log_dir, str(read_depths[i]), 'model.ckpt')
+
+            sample_path = os.path.join(self.gan_samples_dir, 'sample_' + str(training_depths[i]) + '_' + str(transition))
+            if not os.path.exists(sample_path):
+                os.mkdir(sample_path)
+
+            pggan = PGGAN(training_data = self.training_storage,
+                            input_model_path=input_model_path, 
+                            output_model_path=output_model_path,
+                            samples_dir=sample_path, 
+                            log_dir=self.gan_log_dir,
+                            progressive_depth=training_depths[i],
+                            transition=transition)
+
+            pggan.build_model()
+            pggan.train()
 
 if __name__ == '__main__':
 

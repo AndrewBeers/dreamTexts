@@ -6,8 +6,9 @@ import tensorflow as tf
 import numpy as np
 import scipy
 
-from util import add_parameter
+from util import add_parameter, save_images
 from ops import lrelu, conv2d, fully_connect, upscale, pixel_norm, avgpool2d, WScaleLayer, minibatch_state_concat
+
 
 class PGGAN(object):
 
@@ -16,28 +17,29 @@ class PGGAN(object):
 
         # Training Parameters
         add_parameter(self, kwargs, 'batch_size', 16)
-        add_parameter(self, kwargs, 'max_iterations', 32000)
+        add_parameter(self, kwargs, 'max_iterations', 10000)
         add_parameter(self, kwargs, 'learning_rate', 0.0001)
         add_parameter(self, kwargs, 'progressive_depth', 1)
         add_parameter(self, kwargs, 'transition', False)
 
         # Data Parameters
-        self.data_In = data
-        add_parameter(self, kwargs, 'samples_dir')
+        add_parameter(self, kwargs, 'training_data', None)
+        add_parameter(self, kwargs, 'samples_dir', './samples')
         add_parameter(self, kwargs, 'log_dir', './log')
         add_parameter(self, kwargs, 'input_model_path', None)
         add_parameter(self, kwargs, 'output_model_path', None)
 
         # Model Parameters
-        add_parameter(self, kwargs, 'latent_size', 512)
-        add_parameter(self, kwargs, 'max_filter', 1024)
+        add_parameter(self, kwargs, 'latent_size', 128)
+        add_parameter(self, kwargs, 'max_filter', 256)
         add_parameter(self, kwargs, 'channel', 3)
 
         # Derived Parameters
         self.log_vars = []
-        self.output_size = 4 * pow(2, self.progressive_depth - 1)
-        self.images = tf.placeholder(tf.float32, [batch_size, self.output_size, self.output_size, self.channel])
-        self.latent = tf.placeholder(tf.float32, [self.batch_size, self.sample_size])
+        self.output_size = pow(2, self.progressive_depth + 1)
+        self.zoom_level = 64 / self.output_size # TODO make this more flexible --andrew
+        self.images = tf.placeholder(tf.float32, [self.batch_size, self.output_size, self.output_size, self.channel])
+        self.latent = tf.placeholder(tf.float32, [self.batch_size, self.latent_size])
         self.alpha_transition = tf.Variable(initial_value=0.0, trainable=False, name='alpha_transition')
 
     def get_filter_num(self, depth):
@@ -56,7 +58,7 @@ class PGGAN(object):
             convs[-1] = pixel_norm(lrelu(conv2d(convs[-1], output_dim=self.get_filter_num(1), k_h=4, k_w=4, d_w=1, d_h=1, padding='Other', name='gen_n_1_conv')))
 
             convs += [tf.reshape(convs[-1], [self.batch_size, 4, 4, self.get_filter_num(1)])] # why necessary? --andrew
-            convs[-1] = pixel_norm(lrelu(conv2d(convs[-1], output_dim=self.get_nf(1), d_w=1, d_h=1, name='gen_n_2_conv')))
+            convs[-1] = pixel_norm(lrelu(conv2d(convs[-1], output_dim=self.get_filter_num(1), d_w=1, d_h=1, name='gen_n_2_conv')))
 
             for i in range(progressive_depth - 1):
 
@@ -71,8 +73,9 @@ class PGGAN(object):
 
                 convs += [pixel_norm(lrelu(conv2d(convs[-1], output_dim=self.get_filter_num(i + 1), d_w=1, d_h=1, name='gen_n_conv_2_{}'.format(convs[-1].shape[1]))))]
 
+
             #To RGB
-            convs += conv2d(convs[-1], output_dim=3, k_w=1, k_h=1, d_w=1, d_h=1, name='gen_y_rgb_conv_{}'.format(convs[-1].shape[1]))
+            convs += [conv2d(convs[-1], output_dim=3, k_w=1, k_h=1, d_w=1, d_h=1, name='gen_y_rgb_conv_{}'.format(convs[-1].shape[1]))]
 
             if progressive_depth == 1:
                 return convs[-1]
@@ -102,7 +105,7 @@ class PGGAN(object):
 
                 convs += [lrelu(conv2d(convs[-1], output_dim=self.get_filter_num(progressive_depth - 1 - i), d_h=1, d_w=1, name='dis_n_conv_1_{}'.format(convs[-1].shape[1])))]
 
-                convs += lrelu(conv2d(conv, output_dim=self.get_filter_num(progressive_depth - 2 - i), d_h=1, d_w=1, name='dis_n_conv_2_{}'.format(convs[-1].shape[1])))
+                convs += [lrelu(conv2d(convs[-1], output_dim=self.get_filter_num(progressive_depth - 2 - i), d_h=1, d_w=1, name='dis_n_conv_2_{}'.format(convs[-1].shape[1])))]
                 convs[-1] = avgpool2d(convs[-1], 2)
 
                 if i == 0 and transition:
@@ -123,8 +126,8 @@ class PGGAN(object):
 
         # Output functions
         self.fake_images = self.generate(self.latent, progressive_depth=self.progressive_depth, transition=self.transition, alpha_transition=self.alpha_transition)
-        _, self.D_pro_logits = self.discriminate(self.images, reuse=False, progressive_depth = self.pg, transition=self.transition, alpha_transition=self.alpha_transition)
-        _, self.G_pro_logits = self.discriminate(self.fake_images, reuse=True, progressive_depth= self.pg, transition=self.transition, alpha_transition=self.alpha_transition)
+        _, self.D_pro_logits = self.discriminate(self.images, reuse=False, progressive_depth = self.progressive_depth, transition=self.transition, alpha_transition=self.alpha_transition)
+        _, self.G_pro_logits = self.discriminate(self.fake_images, reuse=True, progressive_depth= self.progressive_depth, transition=self.transition, alpha_transition=self.alpha_transition)
 
         # Loss functions
         self.D_loss = tf.reduce_mean(self.G_pro_logits) - tf.reduce_mean(self.D_pro_logits)
@@ -135,7 +138,7 @@ class PGGAN(object):
         self.differences = self.fake_images - self.images
         self.alpha = tf.random_uniform(shape=[self.batch_size, 1, 1, 1], minval=0., maxval=1.)
         interpolates = self.images + (self.alpha * self.differences)
-        _, discri_logits= self.discriminate(interpolates, reuse=True,  progressive_depth= self.pg, transition=self.transition, alpha_transition=self.alpha_transition)
+        _, discri_logits= self.discriminate(interpolates, reuse=True,  progressive_depth=self.progressive_depth, transition=self.transition, alpha_transition=self.alpha_transition)
         gradients = tf.gradients(discri_logits, [interpolates])[0]
 
         # Some sort of norm from papers, check up on it. --andrew
@@ -221,9 +224,11 @@ class PGGAN(object):
 
     def train(self):
 
+        # Create fade-in (transition) parameters.
         step_pl = tf.placeholder(tf.float32, shape=None)
-        alpha_transition_assign = self.alpha_transition.assign(step_pl / self.max_iters)
+        alpha_transition_assign = self.alpha_transition.assign(step_pl / self.max_iterations)
 
+        # Create Optimizers
         opti_D = tf.train.AdamOptimizer(learning_rate=self.learning_rate, beta1=0.0 , beta2=0.99).minimize(
             self.D_loss, var_list=self.d_vars)
         opti_G = tf.train.AdamOptimizer(learning_rate=self.learning_rate, beta1=0.0 , beta2=0.99).minimize(
@@ -235,16 +240,20 @@ class PGGAN(object):
 
         with tf.Session(config=config) as sess:
 
+            # Personally have no idea what is being logged in this thing --andrew
             sess.run(init)
             summary_op = tf.summary.merge_all()
             summary_writer = tf.summary.FileWriter(self.log_dir, sess.graph)
 
+            # No idea what the saving systems is like. TODO investigate --andrew.
+            # I don't think you need to save and reload models if you create a crazy
+            # system where you're only optimizing certain outputs/cost functions at
+            # any one time.
             if self.progressive_depth != 1 and self.progressive_depth != 7:
 
                 if self.transition:
                     self.r_saver.restore(sess, self.input_model_path)
                     self.rgb_saver.restore(sess, self.input_model_path)
-
                 else:
                     self.saver.restore(sess, self.input_model_path)
 
@@ -252,14 +261,14 @@ class PGGAN(object):
             batch_num = 0
             while step <= self.max_iterations:
 
-                # optimization D
                 n_critic = 1
 
+                # Update Discriminator
                 for i in range(n_critic):
 
                     sample_latent = np.random.normal(size=[self.batch_size, self.latent_size])
-                    train_list = self.data_In.getNextBatch(batch_num, self.batch_size)
-                    realbatch_array = CelebA.getShapeForData(train_list, resize_w=self.output_size)
+
+                    realbatch_array = self.training_data.get_next_batch(batch_num=batch_num, zoom_level=self.zoom_level, batch_size=self.batch_size)
 
                     if self.transition and self.progressive_depth != 0:
 
@@ -272,18 +281,19 @@ class PGGAN(object):
                     sess.run(opti_D, feed_dict={self.images: realbatch_array, self.latent: sample_latent})
                     batch_num += 1
 
-                # optimization G
+                # Update Generator
                 sess.run(opti_G, feed_dict={self.latent: sample_latent})
 
                 summary_str = sess.run(summary_op, feed_dict={self.images: realbatch_array, self.latent: sample_latent})
                 summary_writer.add_summary(summary_str, step)
+
                 # the alpha of fake_in process
                 sess.run(alpha_transition_assign, feed_dict={step_pl: step})
 
-                if step % 400 == 0:
+                D_loss, G_loss, D_origin_loss, alpha_tra = sess.run([self.D_loss, self.G_loss, self.D_origin_loss, self.alpha_transition], feed_dict={self.images: realbatch_array, self.latent: sample_latent})
+                print("PG %d, step %d: D loss=%.7f G loss=%.7f, D_or loss=%.7f, opt_alpha_tra=%.7f" % (self.progressive_depth, step, D_loss, G_loss, D_origin_loss, alpha_tra))
 
-                    D_loss, G_loss, D_origin_loss, alpha_tra = sess.run([self.D_loss, self.G_loss, self.D_origin_loss,self.alpha_tra], feed_dict={self.images: realbatch_array, self.latent: sample_latent})
-                    print("PG %d, step %d: D loss=%.7f G loss=%.7f, D_or loss=%.7f, opt_alpha_tra=%.7f" % (self.progressive_depth, step, D_loss, G_loss, D_origin_loss, alpha_tra))
+                if step % 400 == 0:
 
                     realbatch_array = np.clip(realbatch_array, -1, 1)
                     save_images(realbatch_array[0:self.batch_size], [2, self.batch_size/2], '{}/{:02d}_real.png'.format(self.samples_dir, step))

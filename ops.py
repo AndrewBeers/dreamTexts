@@ -144,7 +144,8 @@ def minibatch_state_concat(input, averaging='all'):
     else:
         print "nothing"
 
-    vals = tf.tile(vals, multiples=[input.shape[0], 4, 4, 1])
+    multiples = tuple([int(input.shape[0]), 4, 4, 1])
+    vals = tf.tile(vals, multiples=multiples) # Be aware, need updated TF for this to work.
     return tf.concat([input, vals], axis=3)
 
 
