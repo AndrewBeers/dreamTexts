@@ -31,13 +31,13 @@ class PGGAN(object):
 
         # Model Parameters
         add_parameter(self, kwargs, 'latent_size', 128)
-        add_parameter(self, kwargs, 'max_filter', 256)
+        add_parameter(self, kwargs, 'max_filter', 4096)
         add_parameter(self, kwargs, 'channel', 3)
 
         # Derived Parameters
         self.log_vars = []
         self.output_size = pow(2, self.progressive_depth + 1)
-        self.zoom_level = 64 / self.output_size # TODO make this more flexible --andrew
+        self.zoom_level = self.progressive_depth
         self.images = tf.placeholder(tf.float32, [self.batch_size, self.output_size, self.output_size, self.channel])
         self.latent = tf.placeholder(tf.float32, [self.batch_size, self.latent_size])
         self.alpha_transition = tf.Variable(initial_value=0.0, trainable=False, name='alpha_transition')
@@ -46,7 +46,7 @@ class PGGAN(object):
 
         # This will need to be a bit more complicated; see PGGAN paper.
 
-        return min(self.max_filter / (2 **(depth * 1)), self.max_filter / 2)
+        return min(self.max_filter / (2 **(depth)), 128)
 
     def generate(self, latent_var, progressive_depth=1, transition=False, alpha_transition=0.0):
 
@@ -54,7 +54,7 @@ class PGGAN(object):
 
             convs = []
 
-            convs += [tf.reshape(latent_var, [self.batch_size, 1, 1, self.get_filter_num(1)])]
+            convs += [tf.reshape(latent_var, [self.batch_size, 1, 1, self.latent_size])]
             convs[-1] = pixel_norm(lrelu(conv2d(convs[-1], output_dim=self.get_filter_num(1), k_h=4, k_w=4, d_w=1, d_h=1, padding='Other', name='gen_n_1_conv')))
 
             convs += [tf.reshape(convs[-1], [self.batch_size, 4, 4, self.get_filter_num(1)])] # why necessary? --andrew
@@ -82,6 +82,10 @@ class PGGAN(object):
 
             if transition:
                 convs[-1] = (1 - alpha_transition) * transition_conv + alpha_transition * convs[-1]
+
+            # for conv in convs:
+            #     print conv
+            # fd = dg
 
             return convs[-1]
 
@@ -119,6 +123,10 @@ class PGGAN(object):
             #for D
             output = tf.reshape(convs[-1], [self.batch_size, -1])
             output = fully_connect(output, output_size=1, scope='dis_n_fully')
+
+            # for conv in convs:
+            #     print conv
+            # fd = dg
 
             return tf.nn.sigmoid(output), output
 
@@ -290,8 +298,9 @@ class PGGAN(object):
                 # the alpha of fake_in process
                 sess.run(alpha_transition_assign, feed_dict={step_pl: step})
 
-                D_loss, G_loss, D_origin_loss, alpha_tra = sess.run([self.D_loss, self.G_loss, self.D_origin_loss, self.alpha_transition], feed_dict={self.images: realbatch_array, self.latent: sample_latent})
-                print("PG %d, step %d: D loss=%.7f G loss=%.7f, D_or loss=%.7f, opt_alpha_tra=%.7f" % (self.progressive_depth, step, D_loss, G_loss, D_origin_loss, alpha_tra))
+                if step % 40 == 0:
+                    D_loss, G_loss, D_origin_loss, alpha_tra = sess.run([self.D_loss, self.G_loss, self.D_origin_loss, self.alpha_transition], feed_dict={self.images: realbatch_array, self.latent: sample_latent})
+                    print("PG %d, step %d: D loss=%.7f G loss=%.7f, D_or loss=%.7f, opt_alpha_tra=%.7f" % (self.progressive_depth, step, D_loss, G_loss, D_origin_loss, alpha_tra))
 
                 if step % 400 == 0:
 

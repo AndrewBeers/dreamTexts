@@ -109,26 +109,71 @@ def store_to_hdf5(data_directory, hdf5_file, image_shape, verbose=True):
         except:
             print 'ERROR WRITING TO HDF5', image
 
-    hdf5_file.close()
-    fd = dg
-
     return hdf5_file
 
+def store_preloaded_hdf5_file(input_directory, output_filepath, output_directory=None, verbose=True):
+
+    images = glob.glob(os.path.join(input_directory, '*.png'))
+    num_cases = len(images)
+
+    hdf5_file = tables.open_file(output_filepath, mode='w')
+    filters = tables.Filters(complevel=5, complib='blosc')
+    hdf5_file.create_earray(hdf5_file.root, 'imagenames', tables.StringAtom(256), shape=(0,1), filters=filters, expectedrows=num_cases)
+
+    for dimension in [4,8,16,32,64,128,256,512,1024]:
+        data_shape = (0, dimension, dimension, 3)
+        hdf5_file.create_earray(hdf5_file.root, 'data_' + str(dimension), tables.Float32Atom(), shape=data_shape, filters=filters, expectedrows=num_cases)
+
+    print num_cases
+
+    for idx, filepath in enumerate(images):
+
+        hdf5_file.root.imagenames.append(np.array(os.path.basename(filepath))[np.newaxis][np.newaxis])
+
+        for dimension in [4,8,16,32,64,128,256,512,1024]:
+            try:
+
+                if verbose:
+                    print 'Processing...', os.path.basename(filepath), 'at', dimension, ', idx', idx
+
+                img = Image.open(filepath)
+                data = np.asarray(img, dtype='uint8')
+
+                data = imresize(data, (dimension, dimension))
+
+                getattr(hdf5_file.root, 'data_' + str(dimension)).append(data[np.newaxis])
+
+                if output_directory is not None:
+                    output_filepath = os.path.join(output_directory, str(dimension) + '_' + os.path.basename(filepath))
+                    if not os.path.exists(output_filepath):
+                        img = Image.fromarray(data)
+                        img.save(output_filepath)
+
+            except KeyboardInterrupt:
+                raise
+            except:
+                print 'ERROR converting', filepath, 'at dimension', dimension
+ 
+    hdf5_file.close()
+
+    return
 
 class PageData(object):
 
-    def __init__(self, collection='MBLWHOI', shape=(64,64), hdf5=None):
+    def __init__(self, collection='MBLWHOI', shape=(64,64), hdf5=None, preloaded=False):
 
         self.collection = collection
         self.shape = shape
         self.hdf5 = hdf5
+        self.preloaded = preloaded
 
-        self.image_num = hdf5.root.data.shape[0]
+        self.image_num = getattr(self.hdf5.root, 'data_1024').shape[0]
         self.indexes = np.arange(self.image_num)
         np.random.shuffle(self.indexes)
 
+        self.zoom_mapping = {9:'1024', 8:'512', 7:'256', 6:'128', 5:'64', 4:'32', 3:'16', 2:'8', 1:'4'}
 
-    def get_next_batch(self, batch_num=0, batch_size=64, zoom_level=1):
+    def get_next_batch(self, batch_num=0, batch_size=64, zoom_level=1, mode='preloaded'):
 
         total_batches = self.image_num / batch_size - 1
 
@@ -136,13 +181,19 @@ class PageData(object):
             np.random.shuffle(self.indexes)
 
         indexes = self.indexes[(batch_num % total_batches) * batch_size: (batch_num % total_batches + 1) * batch_size]
-        data = np.array([self.hdf5.root.data[idx] for idx in indexes]) / 127.5 - 1
+        
+        if self.preloaded:
+            data = np.array([getattr(self.hdf5.root, 'data_' + str(self.zoom_mapping[zoom_level]))[idx] for idx in indexes]) / 127.5 - 1
+            return data
 
-        if zoom_level == 1:
-            return data
         else:
-            data = zoom(data, zoom=[1,1.0/zoom_level,1.0/zoom_level,1])
-            return data
+            data = np.array([self.hdf5.root.data[idx] for idx in indexes]) / 127.5 - 1
+
+            if zoom_level == 1:
+                return data
+            else:
+                data = zoom(data, zoom=[1,1.0/zoom_level,1.0/zoom_level,1])
+                return data
 
 
     def close(self):
@@ -157,4 +208,5 @@ if __name__ == '__main__':
 
     # internet_archive_download()
     # convert_pdf_to_image()
-    preprocess_image(input_directory = linux_media + 'Pages_Images', output_directory = linux_media + 'Pages_Images_Preprocessed')
+    # preprocess_image(input_directory = linux_media + 'Pages_Images', output_directory = linux_media + 'Pages_Images_Preprocessed')
+    store_preloaded_hdf5_file(input_directory='./Pages_Images', output_filepath='preloaded_pages.hdf5')
