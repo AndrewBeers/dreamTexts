@@ -10,7 +10,7 @@ if __name__ == '__main__':
     windows_media = 'E:/'
 
     gan = DeepZine(train_data_directory=None,
-                    train_hdf5='preloaded_pages_alt.hdf5',
+                    train_hdf5='../../Local_Data/preloaded_data.hdf5',
                     train_overwrite=False,
                     train_preloaded=True,
                     gan_samples_dir='./samples_smaller',

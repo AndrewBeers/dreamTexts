@@ -111,14 +111,16 @@ class DeepZine(object):
                 os.mkdir(work_dir)
 
         # Inherited this from other code, think of a programmatic way to do it.
-        training_depths = [1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9]
-        read_depths = [1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9]
+        # training_depths = [1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9]
+        # read_depths = [1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9]
+        training_depths = [7,7,8,8,9,9]
+        read_depths = [6,7,7,8,8,9]
         # training_depths = [9]
         # read_depths = [9]
 
         for i in range(len(training_depths)):
 
-            if (i % 2 == 0):
+            if (i % 2 == 1):
                 transition = False
             else:
                 transition = True

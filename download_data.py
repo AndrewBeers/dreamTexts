@@ -1,7 +1,7 @@
 import glob
 import os
 import tables
-import internetarchive
+# import internetarchive
 import numpy as np
 
 from subprocess import call
