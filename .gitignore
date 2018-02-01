@@ -1,10 +1,11 @@
 # Custom
-samples/
-log/
+samples*/
+log*/
 samples_smaller/
 log_smaller/
 *.hdf5
 Pages*/
+*samples/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

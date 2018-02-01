@@ -28,6 +28,10 @@ def save_images(images, size, image_path):
     print data.shape
     return imsave(data, size, image_path)
 
+def save_image(image, image_path):
+    data = inverse_transform(image[0,...])
+    return scipy.misc.imsave(image_path, data)
+
 
 if __name__ == '__main__':
 

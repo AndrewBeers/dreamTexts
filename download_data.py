@@ -167,7 +167,7 @@ class PageData(object):
         self.hdf5 = hdf5
         self.preloaded = preloaded
 
-        self.image_num = getattr(self.hdf5.root, 'data_1024').shape[0]
+        self.image_num = getattr(self.hdf5.root, 'data_4').shape[0]
         self.indexes = np.arange(self.image_num)
         np.random.shuffle(self.indexes)
 

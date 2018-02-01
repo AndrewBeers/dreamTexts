@@ -35,6 +35,11 @@ class DeepZine(object):
         add_parameter(self, kwargs, 'gan_latent_size', 512)
         add_parameter(self, kwargs, 'gan_max_filter', 1024)
 
+        # Test Output Directory
+        add_parameter(self, kwargs, 'test_data_directory', None)
+        add_parameter(self, kwargs, 'test_model_path', None)
+        add_parameter(self, kwargs, 'test_model_samples', 100)
+
         return
 
     def execute(self):
@@ -48,10 +53,14 @@ class DeepZine(object):
             # try:
                 self.train_gan()
             # except:
-                # self.training_storage.close()
-
+                self.training_storage.close()
 
             self.training_storage.close()
+
+        if self.test:
+
+            if True:
+                self.test_gan()
 
         return
 
@@ -111,16 +120,18 @@ class DeepZine(object):
                 os.mkdir(work_dir)
 
         # Inherited this from other code, think of a programmatic way to do it.
-        # training_depths = [1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9]
-        # read_depths = [1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9]
-        training_depths = [7,7,8,8,9,9]
-        read_depths = [6,7,7,8,8,9]
+        training_depths = [1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9]
+        read_depths = [1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9]
+        # training_depths = [9,9]
+        # read_depths = [8,9]
         # training_depths = [9]
         # read_depths = [9]
+        # training_depths = [6,6,7,7]
+        # read_depths = [5,6,6,7]
 
         for i in range(len(training_depths)):
 
-            if (i % 2 == 1):
+            if (i % 2 == 0):
                 transition = False
             else:
                 transition = True
@@ -145,6 +156,20 @@ class DeepZine(object):
 
             pggan.build_model()
             pggan.train()
+
+    def test_gan(self):
+
+        if not os.path.exists(self.test_data_directory):
+            os.makedirs(self.test_data_directory)
+
+        pggan = PGGAN(input_model_path=self.test_model_path,
+                        progressive_depth=8,
+                        testing=True)
+
+        pggan.build_model()
+        pggan.test_model(self.test_data_directory, self.test_model_samples)      
+
+
 
 if __name__ == '__main__':
 

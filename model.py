@@ -6,7 +6,7 @@ import tensorflow as tf
 import numpy as np
 import scipy
 
-from util import add_parameter, save_images
+from util import add_parameter, save_images, save_image
 from ops import lrelu, conv2d, fully_connect, upscale, downscale, pixel_norm, avgpool2d, WScaleLayer, minibatch_state_concat
 
 
@@ -30,9 +30,18 @@ class PGGAN(object):
         add_parameter(self, kwargs, 'output_model_path', None)
 
         # Model Parameters
-        add_parameter(self, kwargs, 'latent_size', 128)
+        add_parameter(self, kwargs, 'latent_size', 2)
         add_parameter(self, kwargs, 'max_filter', 4096)
         add_parameter(self, kwargs, 'channel', 3)
+
+        # Test Parameters
+        add_parameter(self, kwargs, 'testing', False)
+
+        if self.progressive_depth >= 8:
+            self.batch_size = 4
+
+        if self.testing:
+            self.batch_size = 1
 
         # Derived Parameters
         self.log_vars = []
@@ -45,8 +54,12 @@ class PGGAN(object):
     def get_filter_num(self, depth):
 
         # This will need to be a bit more complicated; see PGGAN paper.
-
-        return min(self.max_filter / (2 **(depth)), 128)
+        if depth == 8:
+            return 16
+        if min(self.max_filter / (2 **(depth)), 128) <= 32:
+            return 16
+        else:
+            return min(self.max_filter / (2 **(depth)), 128)
 
     def generate(self, latent_var, progressive_depth=1, transition=False, alpha_transition=0.0):
 
@@ -326,7 +339,100 @@ class PGGAN(object):
 
         tf.reset_default_graph()
 
+    def test_model(self, output_directory, output_num):
 
+        init = tf.global_variables_initializer()
+        config = tf.ConfigProto()
+        config.gpu_options.allow_growth = True
+
+        with tf.Session(config=config) as sess:
+
+            # Personally have no idea what is being logged in this thing --andrew
+            sess.run(init)
+
+            # No idea what the saving systems is like. TODO investigate --andrew.
+            # I don't think you need to save and reload models if you create a crazy
+            # system where you're only optimizing certain outputs/cost functions at
+            # any one time.
+            self.saver.restore(sess, self.input_model_path)
+
+            mode = 'grid'
+
+            if mode == 'random':
+                for idx in xrange(output_num):
+                    print idx
+                    sample_latent = np.random.normal(size=[self.batch_size, self.latent_size])
+                    fake_image = sess.run(self.fake_images, feed_dict={self.latent: sample_latent})
+                    fake_image = np.clip(fake_image, -1, 1)
+                    save_image(fake_image, '{}/{:02d}_test.png'.format(output_directory, idx))
+
+            if mode == 'slerp':
+                sample_latent1 = np.random.normal(size=[self.latent_size])
+                sample_latent2 = np.random.normal(size=[self.latent_size])
+                for idx in xrange(output_num):
+                    sample_latent = slerp(float(idx) / output_num, sample_latent1, sample_latent2)[np.newaxis]
+                    print np.max(sample_latent) - np.min(sample_latent)
+                    fake_image = sess.run(self.fake_images, feed_dict={self.latent: sample_latent})
+                    fake_image = np.clip(fake_image, -1, 1)
+                    save_image(fake_image, '{}/{:02d}_test.png'.format(output_directory, idx))
+
+            if mode == 'tozero':
+                zeros = np.zeros((self.latent_size))
+                sample_latent1 = np.random.normal(size=[self.latent_size])
+                sample_latent2 = np.random.normal(size=[self.latent_size])
+                for idx in xrange(output_num):
+                    if idx < output_num / 2:
+                        sample_latent = lerp(float(idx) / output_num / 2, sample_latent1, zeros)[np.newaxis]
+                    else:
+                        sample_latent = lerp(float(idx-output_num/2) / output_num / 2, zeros, sample_latent2)[np.newaxis]
+                    print idx
+                    fake_image = sess.run(self.fake_images, feed_dict={self.latent: sample_latent})
+                    fake_image = np.clip(fake_image, -1, 1)
+                    save_image(fake_image, '{}/{:02d}_test.png'.format(output_directory, idx))
+
+            if mode == 'points':
+                point_list = [[0,0],[0,1],[0,2],[1,2],[2,2],[2,1],[2,0],[1,0],[0,0]]
+                count = 0
+                for point_idx, point in enumerate(point_list[:-1]):
+                    sample_latent1 = np.array(point)
+                    sample_latent2 = np.array(point_list[point_idx + 1])
+                    for idx in xrange(output_num / (len(point_list) - 1)):
+                        sample_latent = lerp(float(idx) / (output_num / (len(point_list) - 1)), sample_latent1, sample_latent2)[np.newaxis]
+                        print np.max(sample_latent) - np.min(sample_latent)
+                        fake_image = sess.run(self.fake_images, feed_dict={self.latent: sample_latent})
+                        fake_image = np.clip(fake_image, -1, 1)
+                        save_image(fake_image, '{}/{:02d}_test.png'.format(output_directory, count))
+                        count += 1
+
+            if mode == 'grid':
+                x = np.linspace(-3, 3, 100)
+                y = np.linspace(-3, 3, 100)
+                for x_idx in x:
+                    for y_idx in y:
+                        print x_idx, y_idx
+                        sample_latent = np.array([x_idx,y_idx])[np.newaxis]
+                        fake_image = sess.run(self.fake_images, feed_dict={self.latent: sample_latent})
+                        fake_image = np.clip(fake_image, -1, 1)
+                        save_image(fake_image, '{}/{}_test.png'.format(output_directory, str(x_idx) + '_' + str(y_idx)))                        
+
+
+def slerp(val, low, high):
+
+    print val
+    """Spherical interpolation. val has a range of 0 to 1."""
+    if val <= 0:
+        return low
+    elif val >= 1:
+        return high
+    elif np.allclose(low, high):
+        return low
+    omega = np.arccos(np.dot(low/np.linalg.norm(low), high/np.linalg.norm(high)))
+    so = np.sin(omega)
+    return np.sin((1.0-val)*omega) / so * low + np.sin(val*omega)/so * high
+
+def lerp(val, low, high):
+    """Linear interpolation"""
+    return low + (high - low) * val
 
 if __name__ == '__main__':
 
