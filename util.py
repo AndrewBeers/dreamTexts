@@ -1,9 +1,16 @@
 import numpy as np
 import scipy
+import glob
+import os
+import re
 
-def merge(images, size):
+from PIL import Image
+
+from qtim_tools.qtim_utilities.nifti_util import save_numpy_2_nifti
+
+def merge(images, size, channels=3):
     h, w = images.shape[1], images.shape[2]
-    img = np.zeros((h * size[0], w * size[1], 3))
+    img = np.zeros((h * size[0], w * size[1], channels))
     for idx, image in enumerate(images):
         i = idx % size[1]
         j = idx // size[1]
@@ -12,7 +19,12 @@ def merge(images, size):
     return img
 
 def imsave(images, size, path):
-    return scipy.misc.imsave(path, merge(images, size))
+    if images.shape[-1] == 3:
+        return scipy.misc.imsave(path, merge(images, size))
+    else:
+        scipy.misc.imsave(path, merge(images[:,:,:,:3], size))
+        new_path = path[0:-4] + '_mask.png'
+        return scipy.misc.imsave(new_path, np.squeeze(merge(images[:,:,:,3][:,:,:,np.newaxis], size, channels=1)))
 
 def inverse_transform(image):
     return ((image + 1.)* 127.5).astype(np.uint8)
@@ -29,10 +41,56 @@ def save_images(images, size, image_path):
     return imsave(data, size, image_path)
 
 def save_image(image, image_path):
-    data = inverse_transform(image[0,...])
-    return scipy.misc.imsave(image_path, data)
+    if image_path.endswith('png'):
+        data = inverse_transform(image[0,...])
+        if data.shape[-1] == 4:
+            data = data[:,:,:-1]
+        return scipy.misc.imsave(image_path, data)
+    # elif:
+    #     image_path.endswith('nii.gz'):
+    #     data = inverse_transform(image[0,...])
+    #     for dim in xrange(data.shape[-1]):
+    #         pass
+    #     return
+    # else:
+    #     return
 
+def try_int(s):
+    "Convert to integer if possible."
+    try: return int(s)
+    except: return s
+
+def natsort_key(s):
+    "Used internally to get a tuple by which s is sorted."
+    import re
+    return map(try_int, re.findall(r'(\d+|\D+)', s))
+
+def natcmp(a, b):
+    "Natural string comparison, case sensitive."
+    return cmp(natsort_key(a), natsort_key(b))
+
+def natcasecmp(a, b):
+    "Natural string comparison, ignores case."
+    return natcmp(a.lower(), b.lower())
+
+def stack_to_nii(image_directory, output_path='synthetic_brain'):
+
+    images = glob.glob(os.path.join(image_directory, '*.png'))
+    images.sort(natcasecmp)
+    print images
+
+    image_list = []
+    for image in images:
+        image_list += [np.asarray(Image.open(image), dtype=float)]
+    image_stack = np.stack(image_list, axis=2)
+
+    print image_stack.shape
+
+    for dim in xrange(image_stack.shape[-1]):
+        save_numpy_2_nifti(image_stack[...,dim], np.eye(4), output_path + '_' + str(dim) + '.nii.gz')
 
 if __name__ == '__main__':
+
+    stack_to_nii('./mri_slerp')
 
     pass

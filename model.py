@@ -17,7 +17,7 @@ class PGGAN(object):
 
         # Training Parameters
         add_parameter(self, kwargs, 'batch_size', 16)
-        add_parameter(self, kwargs, 'max_iterations', 10000)
+        add_parameter(self, kwargs, 'max_iterations', 20000)
         add_parameter(self, kwargs, 'learning_rate', 0.0001)
         add_parameter(self, kwargs, 'progressive_depth', 1)
         add_parameter(self, kwargs, 'transition', False)
@@ -30,7 +30,7 @@ class PGGAN(object):
         add_parameter(self, kwargs, 'output_model_path', None)
 
         # Model Parameters
-        add_parameter(self, kwargs, 'latent_size', 2)
+        add_parameter(self, kwargs, 'latent_size', 128)
         add_parameter(self, kwargs, 'max_filter', 4096)
         add_parameter(self, kwargs, 'channel', 3)
 
@@ -41,7 +41,7 @@ class PGGAN(object):
             self.batch_size = 4
 
         if self.testing:
-            self.batch_size = 1
+            self.batch_size = 8
 
         # Derived Parameters
         self.log_vars = []
@@ -78,7 +78,7 @@ class PGGAN(object):
                 if i == progressive_depth - 2 and transition: # redundant conditions? --andrew
                     #To RGB
                     # Don't totally understand this yet, diagram out --andrew
-                    transition_conv = conv2d(convs[-1], output_dim=3, k_w=1, k_h=1, d_w=1, d_h=1, name='gen_y_rgb_conv_{}'.format(convs[-1].shape[1]))
+                    transition_conv = conv2d(convs[-1], output_dim=self.channel, k_w=1, k_h=1, d_w=1, d_h=1, name='gen_y_rgb_conv_{}'.format(convs[-1].shape[1]))
                     transition_conv = upscale(transition_conv, 2)
 
                 convs += [upscale(convs[-1], 2)]
@@ -88,7 +88,7 @@ class PGGAN(object):
 
 
             #To RGB
-            convs += [conv2d(convs[-1], output_dim=3, k_w=1, k_h=1, d_w=1, d_h=1, name='gen_y_rgb_conv_{}'.format(convs[-1].shape[1]))]
+            convs += [conv2d(convs[-1], output_dim=self.channel, k_w=1, k_h=1, d_w=1, d_h=1, name='gen_y_rgb_conv_{}'.format(convs[-1].shape[1]))]
 
             if progressive_depth == 1:
                 return convs[-1]
@@ -320,12 +320,6 @@ class PGGAN(object):
                     realbatch_array = np.clip(realbatch_array, -1, 1)
                     save_images(realbatch_array[0:self.batch_size], [2, self.batch_size/2], '{}/{:02d}_real.png'.format(self.samples_dir, step))
 
-                    if self.transition and self.progressive_depth != 0:
-
-                        low_realbatch_array = sess.run(self.low_images, feed_dict={self.images: realbatch_array})
-                        low_realbatch_array = np.clip(low_realbatch_array, -1, 1)
-                        save_images(low_realbatch_array[0:self.batch_size], [2, self.batch_size / 2], '{}/{:02d}_real_lower.png'.format(self.samples_dir, step))
-                   
                     fake_image = sess.run(self.fake_images, feed_dict={self.images: realbatch_array, self.latent: sample_latent})
                     fake_image = np.clip(fake_image, -1, 1)
                     save_images(fake_image[0:self.batch_size], [2, self.batch_size/2], '{}/{:02d}_train.png'.format(self.samples_dir, step))
@@ -339,7 +333,7 @@ class PGGAN(object):
 
         tf.reset_default_graph()
 
-    def test_model(self, output_directory, output_num):
+    def test_model(self, output_directory, output_num, output_format='png'):
 
         init = tf.global_variables_initializer()
         config = tf.ConfigProto()
@@ -356,7 +350,7 @@ class PGGAN(object):
             # any one time.
             self.saver.restore(sess, self.input_model_path)
 
-            mode = 'grid'
+            mode = 'axis'
 
             if mode == 'random':
                 for idx in xrange(output_num):
@@ -364,7 +358,7 @@ class PGGAN(object):
                     sample_latent = np.random.normal(size=[self.batch_size, self.latent_size])
                     fake_image = sess.run(self.fake_images, feed_dict={self.latent: sample_latent})
                     fake_image = np.clip(fake_image, -1, 1)
-                    save_image(fake_image, '{}/{:02d}_test.png'.format(output_directory, idx))
+                    save_image(fake_image, '{}/{:02d}_test.{}'.format(output_directory, idx, output_format))
 
             if mode == 'slerp':
                 sample_latent1 = np.random.normal(size=[self.latent_size])
@@ -374,7 +368,7 @@ class PGGAN(object):
                     print np.max(sample_latent) - np.min(sample_latent)
                     fake_image = sess.run(self.fake_images, feed_dict={self.latent: sample_latent})
                     fake_image = np.clip(fake_image, -1, 1)
-                    save_image(fake_image, '{}/{:02d}_test.png'.format(output_directory, idx))
+                    save_image(fake_image, '{}/{:02d}_test.{}'.format(output_directory, idx, output_format))
 
             if mode == 'tozero':
                 zeros = np.zeros((self.latent_size))
@@ -388,7 +382,7 @@ class PGGAN(object):
                     print idx
                     fake_image = sess.run(self.fake_images, feed_dict={self.latent: sample_latent})
                     fake_image = np.clip(fake_image, -1, 1)
-                    save_image(fake_image, '{}/{:02d}_test.png'.format(output_directory, idx))
+                    save_image(fake_image, '{}/{:02d}_test.{}'.format(output_directory, idx, output_format))
 
             if mode == 'points':
                 point_list = [[0,0],[0,1],[0,2],[1,2],[2,2],[2,1],[2,0],[1,0],[0,0]]
@@ -403,6 +397,23 @@ class PGGAN(object):
                         fake_image = np.clip(fake_image, -1, 1)
                         save_image(fake_image, '{}/{:02d}_test.png'.format(output_directory, count))
                         count += 1
+
+            if mode == 'axis':
+                axis = 0
+                axis_batch = 6
+                sample_latent1 = np.random.normal(size=[self.batch_size, self.latent_size])
+                sample_latent2 = np.random.normal(size=[self.batch_size, self.latent_size])
+                sample_latent2[:, axis] = 3 * np.ones((self.batch_size))
+                sample_latent1[:, axis] = -3 * np.ones((self.batch_size))
+                for idx in xrange(output_num):
+                    sample_latent = batch_slerp(float(idx) / output_num, sample_latent1, sample_latent2)
+                    print sample_latent1.shape
+                    print np.max(sample_latent) - np.min(sample_latent)
+                    print sample_latent.shape
+                    fake_image = sess.run(self.fake_images, feed_dict={self.latent: sample_latent})
+                    fake_image = np.clip(fake_image, -1, 1)
+                    save_images(fake_image, [2, 4], '{}/{:02d}_test.{}'.format(output_directory, idx, output_format))
+
 
             if mode == 'grid':
                 x = np.linspace(-3, 3, 100)
@@ -429,6 +440,27 @@ def slerp(val, low, high):
     omega = np.arccos(np.dot(low/np.linalg.norm(low), high/np.linalg.norm(high)))
     so = np.sin(omega)
     return np.sin((1.0-val)*omega) / so * low + np.sin(val*omega)/so * high
+
+def batch_slerp(val, low, high):
+
+    print val
+    output_batch = np.zeros_like(low)
+
+    """Spherical interpolation. val has a range of 0 to 1."""
+    for idx, vals in enumerate(zip(low, high)):
+        low, high = vals
+        if val <= 0:
+            output_batch[idx, :] = low
+        elif val >= 1:
+            output_batch[idx, :] = high
+        elif np.allclose(low, high):
+            output_batch[idx, :] = low
+        omega = np.arccos(np.dot(low/np.linalg.norm(low), high/np.linalg.norm(high)))
+        so = np.sin(omega)
+        output_batch[idx, :] = np.sin((1.0-val)*omega) / so * low + np.sin(val*omega)/so * high
+
+    print 'output batch shape', output_batch.shape
+    return output_batch
 
 def lerp(val, low, high):
     """Linear interpolation"""

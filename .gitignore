@@ -6,6 +6,9 @@ log_smaller/
 *.hdf5
 Pages*/
 *samples/
+*.nii.gz
+*.png
+rop*/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

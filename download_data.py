@@ -51,9 +51,10 @@ def convert_pdf_to_image(conversion_directory='E:\Pages', output_directory='E:\P
 
     return
 
-def preprocess_image(input_directory='E:/Pages_Images', output_directory='E:/Pages_Images_Preprocessed', resize_shape=(64, 64), verbose=True):
+def preprocess_image(input_directory='E:/Pages_Images', output_directory='E:/Pages_Images_Preprocessed', resize_shape=(512, 512), verbose=True):
 
-    images = glob.glob(os.path.join(input_directory, '*.png'))
+    print input_directory
+    images = glob.glob(os.path.join(input_directory, '*.*'))
 
     for filepath in images:
 
@@ -66,6 +67,8 @@ def preprocess_image(input_directory='E:/Pages_Images', output_directory='E:/Pag
 
                 img = Image.open(filepath)
                 data = np.asarray(img, dtype='uint8')
+
+                print data.shape
 
                 data = imresize(data, resize_shape)
 
@@ -111,37 +114,57 @@ def store_to_hdf5(data_directory, hdf5_file, image_shape, verbose=True):
 
     return hdf5_file
 
-def store_preloaded_hdf5_file(input_directory, output_filepath, output_directory=None, verbose=True):
+def store_preloaded_hdf5_file(input_directory, output_filepath, output_directory=None, verbose=True, mask_directory=None, dimensions=[4,8,16,32,64,128,256,512], rop=False):
 
-    images = glob.glob(os.path.join(input_directory, '*.png'))
+    images = glob.glob(os.path.join(input_directory, '*.*'))
     num_cases = len(images)
 
     hdf5_file = tables.open_file(output_filepath, mode='w')
     filters = tables.Filters(complevel=5, complib='blosc')
     hdf5_file.create_earray(hdf5_file.root, 'imagenames', tables.StringAtom(256), shape=(0,1), filters=filters, expectedrows=num_cases)
 
-    for dimension in [4,8,16,32,64,128,256,512,1024]:
-        data_shape = (0, dimension, dimension, 3)
-        hdf5_file.create_earray(hdf5_file.root, 'data_' + str(dimension), tables.Float32Atom(), shape=data_shape, filters=filters, expectedrows=num_cases)
+    if mask_directory is not None:
+        channels = 4
+    else:
+        channels = 3
 
-    print num_cases
+    for dimension in dimensions:
+        data_shape = (0, dimension, dimension, channels)
+        hdf5_file.create_earray(hdf5_file.root, 'data_' + str(dimension), tables.Float32Atom(), shape=data_shape, filters=filters, expectedrows=num_cases)
 
     for idx, filepath in enumerate(images):
 
         hdf5_file.root.imagenames.append(np.array(os.path.basename(filepath))[np.newaxis][np.newaxis])
 
-        for dimension in [4,8,16,32,64,128,256,512,1024]:
+        img = Image.open(filepath)
+        data = np.asarray(img, dtype=float)[:,:,0:3]
+        print data.shape
+
+        if rop:
+            if data.shape != (480, 640, 3):
+                data = imresize(data, (480, 640))
+
+        if mask_directory is not None:
             try:
+                img_mask = Image.open(os.path.join(mask_directory, os.path.basename(filepath)[0:-3] + 'png'))
+            except:
+                continue
+            data_mask = np.asarray(img_mask, dtype=float)
+
+        for dimension in dimensions:
+            try:
+            # if True:
 
                 if verbose:
                     print 'Processing...', os.path.basename(filepath), 'at', dimension, ', idx', idx
 
-                img = Image.open(filepath)
-                data = np.asarray(img, dtype='uint8')
+                resized_data = imresize(data, (dimension, dimension))
 
-                data = imresize(data, (dimension, dimension))
+                if mask_directory is not None:
+                    resized_mask = imresize(data_mask, (dimension, dimension))[:,:,np.newaxis]
+                    resized_data = np.concatenate((resized_data, resized_mask), axis=2)
 
-                getattr(hdf5_file.root, 'data_' + str(dimension)).append(data[np.newaxis])
+                getattr(hdf5_file.root, 'data_' + str(dimension)).append(resized_data[np.newaxis])
 
                 if output_directory is not None:
                     output_filepath = os.path.join(output_directory, str(dimension) + '_' + os.path.basename(filepath))
@@ -195,11 +218,17 @@ class PageData(object):
                 data = zoom(data, zoom=[1,1.0/zoom_level,1.0/zoom_level,1])
                 return data
 
+    def save_test_image(self):
+
+        data = getattr(self.hdf5.root, 'data_512')[0,:,:,:3]
+        print data.shape
+        print np.unique(data)
+        import scipy
+        scipy.misc.imsave('test_image.png', data)
 
     def close(self):
 
         self.hdf5.close()
-
 
 if __name__ == '__main__':
 
@@ -209,4 +238,7 @@ if __name__ == '__main__':
     # internet_archive_download()
     # convert_pdf_to_image()
     # preprocess_image(input_directory = linux_media + 'Pages_Images', output_directory = linux_media + 'Pages_Images_Preprocessed')
-    store_preloaded_hdf5_file(input_directory='./Pages_Images', output_filepath='preloaded_pages.hdf5')
+    store_preloaded_hdf5_file(input_directory='/mnt/jk489/James/plus_classification/results_with_200_excluded/datasets/FullDataset/raw/Posterior', output_filepath='rop_masks.hdf5', mask_directory='/mnt/jk489/James/plus_classification/results_with_200_excluded/datasets/FullDataset/vessel_segmentation/Posterior', rop=True)
+
+    # test_data = PageData(hdf5=tables.open_file('rop_masks.hdf5', "r"), preloaded=True)
+    # test_data.save_test_image()

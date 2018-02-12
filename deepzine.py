@@ -94,18 +94,18 @@ class DeepZine(object):
         # else:
         #     converted_directory = data_directory
 
-        # # Preprocess Images. TODO (different preprocessing methods)
+        # Preprocess Images. TODO (different preprocessing methods)
         # if preprocess_images:
-        #     preprocessed_directory = os.path.join(data_directory, 'converted_images')
-        #     if not os.path.exists(converted_directory):
-        #         os.mkdir(converted_directory)
-        #     convert_pdf_to_image(data_directory, converted_directory)
+        #     preprocessed_directory = os.path.join('.', 'rop_images')
+        #     if not os.path.exists(preprocessed_directory):
+        #         os.mkdir(preprocessed_directory)
+        #     preprocess_image(data_directory, preprocessed_directory)
         # else:
-        #     preprocessed_directory = converted_directory
+        #     preprocessed_directory = preprocessed_directory
 
         # Convert to HDF5
         if not os.path.exists(hdf5) or overwrite:
-            output_hdf5 = store_to_hdf5(preprocessed_directory, hdf5, preprocess_shape)
+            output_hdf5 = store_preloaded_hdf5_file(preprocessed_directory, hdf5, preprocess_shape)
         else:
             output_hdf5 = tables.open_file(hdf5, "r")
 
@@ -126,8 +126,8 @@ class DeepZine(object):
         # read_depths = [8,9]
         # training_depths = [9]
         # read_depths = [9]
-        # training_depths = [6,6,7,7]
-        # read_depths = [5,6,6,7]
+        # training_depths = [4,4,5,5,6,6,7,7,8,8,9,9]
+        # read_depths = [3,4,4,5,5,6,6,7,7,8,8,9]
 
         for i in range(len(training_depths)):
 
@@ -152,7 +152,8 @@ class DeepZine(object):
                             samples_dir=sample_path, 
                             log_dir=self.gan_log_dir,
                             progressive_depth=training_depths[i],
-                            transition=transition)
+                            transition=transition,
+                            channel=4)
 
             pggan.build_model()
             pggan.train()
@@ -164,7 +165,8 @@ class DeepZine(object):
 
         pggan = PGGAN(input_model_path=self.test_model_path,
                         progressive_depth=8,
-                        testing=True)
+                        testing=True,
+                        channel=4)
 
         pggan.build_model()
         pggan.test_model(self.test_data_directory, self.test_model_samples)      
