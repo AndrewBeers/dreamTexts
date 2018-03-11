@@ -19,8 +19,15 @@ def merge(images, size, channels=3):
     return img
 
 def imsave(images, size, path):
-    if images.shape[-1] == 3:
+    if images.shape[-1] > 4:
+        for channel in xrange(4):
+            new_path = path[0:-4] + '_' + str(channel) + '.png'
+            scipy.misc.imsave(new_path, merge(images[..., channel][..., np.newaxis], size))
+        return scipy.misc.imsave(path, merge(images[..., 4:], size))
+    elif images.shape[-1] == 3:
         return scipy.misc.imsave(path, merge(images, size))
+    elif images.shape[-1] == 1:
+        scipy.misc.imsave(path, np.squeeze(merge(images[:,:,:,0][:,:,:,np.newaxis], size, channels=1)))
     else:
         scipy.misc.imsave(path, merge(images[:,:,:,:3], size))
         new_path = path[0:-4] + '_mask.png'
@@ -40,9 +47,8 @@ def save_images(images, size, image_path):
     print data.shape
     return imsave(data, size, image_path)
 
-def save_image(image, image_path):
+def save_image(data, image_path):
     if image_path.endswith('png'):
-        data = inverse_transform(image[0,...])
         if data.shape[-1] == 4:
             data = data[:,:,:-1]
         return scipy.misc.imsave(image_path, data)

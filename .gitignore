@@ -9,6 +9,11 @@ Pages*/
 *.nii.gz
 *.png
 rop*/
+*.csv
+saved*/
+mri*/
+*/
+*.npy
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
